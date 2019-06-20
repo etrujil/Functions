@@ -18,14 +18,14 @@ from datetime import timedelta
 # Basic Functions
 
 
-def parse_extent(fname, cellsize_return=0):
+def parse_extent(fname, cellsize_return=False, x_field='x', y_field='y'):
     """
     Author: Micah Johnson, mod. by Ernesto Trujillo
     Uses ogr to parse the information of some GIS file and returns a list of the
     response of the things important to this script.
     Args:
         fname: Full path point to file containing GIS information
-        cellsize_return: Optional (deafault = 0). 1 will add cellsize as the
+        cellsize_return: Optional (deafault = False). True will add cellsize as the
                          last element of the return list. Option only for '.asc'
     Returns:
         extent: containing images extent in list type
@@ -99,17 +99,51 @@ def parse_extent(fname, cellsize_return=0):
                 w = [w[i_w] for i_w in range(len(w)) if w[i_w] != '']
                 cellsize = float(w[-1])
 
-            if cellsize_return == 1:
-                extent = [x_ll, y_ll,
-                          x_ll + (n_cols + 1) * cellsize,
-                          y_ll + (n_rows + 1) * cellsize,
-                          cellsize]
+            extent = [x_ll, y_ll,
+                      x_ll + (n_cols + 1) * cellsize,
+                      y_ll + (n_rows + 1) * cellsize]
 
-            else:
+            if cellsize_return == True:
+                extent.append(cellsize)
 
-                extent = [x_ll, y_ll,
-                          x_ll + n_cols * cellsize,
-                          y_ll + n_rows * cellsize]
+    elif file_type == 'nc':
+
+        try:
+            ncfile = nc.Dataset(fname, 'r')
+        except FileNotFoundError:
+            print('File not found, please check file path and name')
+            return None
+
+        # Extract fields of interest
+        try:
+            x_vector = ncfile.variables[x_field][:]
+        except KeyError:
+            print('x_field key not found, please check x_field key')
+            return None
+
+        try:
+            y_vector = ncfile.variables[y_field][:]
+        except KeyError:
+            print('y_field key not found, please check y_field key')
+            return None
+
+        # Determine extents of input netCDF file
+
+        n_cols = len(x_vector)
+        n_rows = len(y_vector)
+        # Be careful if coordinate system is lat-lon and southern hemisphere, etc.
+        # Should be in meters (projected coordinate system)
+        dx = abs(x_vector[1]-x_vector[0])  # in meters
+        dy = abs(x_vector[1]-x_vector[0])  # in meters
+        x_ll = x_vector.min() - dx/2  # the nc_file uses center of cell coords
+        y_ll = y_vector.min() - dy/2  # Change if not cell center coords
+
+        extent = [x_ll, y_ll,
+                  x_ll + (n_cols + 1) * dx,
+                  y_ll + (n_rows + 1) * dy]
+
+        if cellsize_return == True:
+            extent += [dx, dy]
 
     else:
         raise IOError("File type .{0} not recoginizeable for parsing extent"
@@ -536,6 +570,8 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
     swi_dy = abs(x_vector[1]-x_vector[0])  # in meters
     watershed_extent = parse_extent(watershed_file, cellsize_return=1)
 
+    # Reproject the watershed file into the SWI extend and cellsize file
+
     time_zone = utc_out - utc_in
 
     # determine watershed indices
@@ -581,7 +617,7 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
 # ------------------------------------------------------------------------------
 
 # UNFINISHED!
-#
+# The idea is to put in smet format for input snowmelt
 #
 # def cactmentswi_to_smet(watershed_swi_file_names, date_ini, date_end, freq_out='60min', fill_nans=True):
 #     '''
