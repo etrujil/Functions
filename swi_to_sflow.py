@@ -10,9 +10,10 @@ import numpy as np
 import pandas as pd
 import os
 
-from subprocess import Popen, check_output, PIPE
+from subprocess import Popen, check_output, PIPE, run
 from datetime import datetime
 from datetime import timedelta
+from skimage import io
 
 # ------------------------------------------------------------------------------
 # Basic Functions
@@ -63,7 +64,9 @@ def parse_extent(fname, cellsize_return=False, x_field='x', y_field='y'):
                         pass
 
     elif file_type == 'asc':
+
         ascii_file = open(fname, 'r')
+
         ascii_headlines = []
         ascii_headlines = [ascii_file.readline().strip('\n')
                            for i_line in range(6)]
@@ -100,31 +103,27 @@ def parse_extent(fname, cellsize_return=False, x_field='x', y_field='y'):
                 cellsize = float(w[-1])
 
             extent = [x_ll, y_ll,
-                      x_ll + (n_cols + 1) * cellsize,
-                      y_ll + (n_rows + 1) * cellsize]
+                      x_ll + (n_cols) * cellsize,
+                      y_ll + (n_rows) * cellsize]
 
             if cellsize_return == True:
                 extent.append(cellsize)
 
     elif file_type == 'nc':
 
-        try:
-            ncfile = nc.Dataset(fname, 'r')
-        except FileNotFoundError:
-            print('File not found, please check file path and name')
-            return None
+        ncfile = nc.Dataset(fname, 'r')
 
         # Extract fields of interest
         try:
             x_vector = ncfile.variables[x_field][:]
         except KeyError:
-            print('x_field key not found, please check x_field key')
+            print('KeyError: x_field key not found')
             return None
 
         try:
             y_vector = ncfile.variables[y_field][:]
         except KeyError:
-            print('y_field key not found, please check y_field key')
+            print('KeyError: y_field key not found')
             return None
 
         # Determine extents of input netCDF file
@@ -134,16 +133,18 @@ def parse_extent(fname, cellsize_return=False, x_field='x', y_field='y'):
         # Be careful if coordinate system is lat-lon and southern hemisphere, etc.
         # Should be in meters (projected coordinate system)
         dx = abs(x_vector[1]-x_vector[0])  # in meters
-        dy = abs(x_vector[1]-x_vector[0])  # in meters
+        dy = abs(y_vector[1]-y_vector[0])  # in meters
         x_ll = x_vector.min() - dx/2  # the nc_file uses center of cell coords
         y_ll = y_vector.min() - dy/2  # Change if not cell center coords
 
         extent = [x_ll, y_ll,
-                  x_ll + (n_cols + 1) * dx,
-                  y_ll + (n_rows + 1) * dy]
+                  x_ll + (n_cols) * dx,
+                  y_ll + (n_rows) * dy]
 
         if cellsize_return == True:
             extent += [dx, dy]
+
+        ncfile.close()
 
     else:
         raise IOError("File type .{0} not recoginizeable for parsing extent"
@@ -514,20 +515,48 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
         per unit time (m^3 s-1) if output_option = 0 or 1.
     '''
 
+    # Determine extent of input grids
+    watershed_extent = parse_extent(watershed_file, cellsize_return=True)
+    swi_extent = parse_extent(swinc, cellsize_return=True)
+    swi_dx = swi_extent[-2]
+    swi_dy = swi_extent[-1]
+
+    swi_window_str = str(swi_extent[0])
+    for i_extent in swi_extent[1:4]:
+        swi_window_str += (' ' + str(i_extent))
+
+    # Reproject the watershed file into the SWI extend and cellsize file
+    run_arg = 'gdalwarp -te ' + swi_window_str + ' -of GTiff ' +\
+        '-tr ' + str(swi_extent[4]) + ' ' + str(swi_extent[5]) +\
+        ' -r near -overwrite ' + watershed_file + ' wfile_proj.tif'
+    print(run_arg)
+    run(run_arg, shell=True)
+
+    # Input watershed definition grid
+    watershed_grid = io.imread('wfile_proj.tif')  # reprojected wfile
+
     # Reading in data from files and extracting said data
-    # watershed_path = os.path.abspath('./' + watershed_file)
-    # Uncomment line above and comment line below to use local path
-    watershed_path = watershed_file
-    watershed_grid = np.loadtxt(watershed_path, skiprows=6)
-    # swi_dataset = os.path.abspath('./' + swinc)
-    swi_dataset = swinc
-    # Uncomment line above and comment line below to use local path
-    ncfile = nc.Dataset(swi_dataset, 'r')
+    ncfile = nc.Dataset(swinc, 'r')
+
+    shape_wfile = np.shape(watershed_grid)
+    print('Size of watershed definition field is {}'.format(shape_wfile))
+    shape_nc = np.shape(ncfile.variables[swi_field][0])
+    print('Size of SWI fields is {}'.format(shape_nc))
 
     # Extract fields of interest
     x_vector = ncfile.variables[swi_x_field][:]
     y_vector = ncfile.variables[swi_y_field][:]
+    print('min and max x are {} and {}, respectively. len of x is {}'.format(
+        min(x_vector), max(x_vector), len(x_vector)))
+    print('min and max y are {} and {}, respectively. len of y is {}'.format(
+        min(y_vector), max(y_vector), len(y_vector)))
     time_field = ncfile.variables[swi_time_field][:]
+
+    if not ((shape_wfile[0] == shape_nc[0])
+            and (shape_wfile[1] == shape_nc[1])):
+        print('Matrix size of watershed definition file and swi file after '
+              + 'reprojection is not the same, check and re-run')
+        return None
 
     # Determine time steps to export
     zero_timestamp = pd.to_datetime(date_zero, infer_datetime_format=True)
@@ -558,20 +587,7 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
               + 'date reset to match final date on file')
         end_index = len(time_field) - 1
 
-    # Determine extents of input SWI (swinc) and Watershed definition file
-    # (watershed_file)
-    swi_n_x = len(x_vector)
-    swi_n_y = len(y_vector)
-    # Be careful if coordinate system is lat-lon and southern hemisphere, etc.
-    # Should be in meters (projected coordinate system)
-    swi_xll = x_vector.min()
-    swi_yll = y_vector.min()
-    swi_dx = abs(x_vector[1]-x_vector[0])  # in meters
-    swi_dy = abs(x_vector[1]-x_vector[0])  # in meters
-    watershed_extent = parse_extent(watershed_file, cellsize_return=1)
-
-    # Reproject the watershed file into the SWI extend and cellsize file
-
+    # Offset in time to write SWI timeseries
     time_zone = utc_out - utc_in
 
     # determine watershed indices
@@ -586,14 +602,14 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
         watershed_area.area.values, index=watershed_numbers, columns=['area'])
 
     # Loop through dates and create files
-    for i_files in range(int(ini_index), int(end_index+1)):
+    for i_time in range(int(ini_index), int(end_index+1)):
 
-        swi_matrix = ncfile.variables[swi_field][i_files, :, :]
+        swi_matrix = ncfile.variables[swi_field][i_time, :, :]
         swi_matrix *= convert_factor  # should give m SWI
-        # (or m m^-2 per time step)
+        # (or m per time step)
         swi_matrix[np.isnan(swi_matrix)] = 0.0
         i_timestamp = (zero_timestamp
-                       + i_files*delta_timestamp
+                       + i_time*delta_timestamp
                        + delta_timestamp_utc)
 
         swi_volume = pd.DataFrame(np.array(
@@ -610,6 +626,19 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
 
     swi_timeseries = swi_timeseries.T
     swi_timeseries.to_csv(filename_out)
+
+    # Output
+    if output_option == 0:
+        return swi_timeseries
+    elif output_option == 1:
+        swi_timeseries.to_csv(filename_out)
+        return swi_timeseries
+    elif output_option == 2:
+        swi_timeseries.to_csv(filename_out)
+        return None
+    else:
+        print("Error: Invalid output selection, no output or files were generated")
+        return None
 
     ncfile.close()
 
@@ -632,9 +661,9 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
 #                                   individual files to combine in the SMET
 #                                   files. The file must contain one filename per
 #                                   line. E.g.,
-#                                   'SWI_2007_tollgate_wfile_150.csv
-#                                   SWI_2008_tollgate_wfile_150.csv
-#                                   SWI_2009_tollgate_wfile_150.csv'
+#                                   'file_1.csv
+#                                   file_2.csv
+#                                   file_3.csv'
 #
 #                                   input is in m^3 s^-1
 #
@@ -658,6 +687,9 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
 #     swi_n_fields = []  # list
 #     swi_dict = {}  # dictionary
 #
+#     # Dataframe to fill
+#     index_df = pd.date_range(start=date_ini, end=date_end, freq='H')
+#     df_out = pd.DataFrame(data=np.zeros(len(index_df)), index=index_df,)
 #     with open(watershed_swi_file_names) as f_swi:
 #         file_names = f_swi.read().split('\n')
 #
