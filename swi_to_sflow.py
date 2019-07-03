@@ -17,6 +17,7 @@ from skimage import io
 
 # ------------------------------------------------------------------------------
 # Basic Functions
+# Function 1
 
 
 def parse_extent(fname, cellsize_return=False, x_field='x', y_field='y'):
@@ -155,10 +156,11 @@ def parse_extent(fname, cellsize_return=False, x_field='x', y_field='y'):
 
 # ------------------------------------------------------------------------------
 # File preparation functions
+# Function 2
 
 
 def swi_to_ascii(swinc, swi_x_field, swi_y_field, swi_time_field, swi_field,
-                 date_ini, date_end, convert_factor=1, utc_in=0,
+                 date_ini=None, date_end=None, convert_factor=1, utc_in=0,
                  utc_out=0):
     '''
     Converts the SWI output from iSnobal netcdf files to ascii grids
@@ -173,8 +175,12 @@ def swi_to_ascii(swinc, swi_x_field, swi_y_field, swi_time_field, swi_field,
         swi_field: name of the field containing SWI (Surface Water Input)
                    SWI from iSNOBAL/AWSM in [kg / m^2 / timestep]
                    (or [mm / m^2 / timestep])
-        date_ini: start date for extraction from "swinc" in utc_out
-        date_end: final date of extraction from "swinc" in utc_out
+        date_ini: Optional (default = None): start date for extraction
+                  from "swinc" in utc_out. If None, extracts from the first
+                  date on file
+        date_end: Optional (default = None): final date of extraction
+                  from "swinc" in utc_out. If None, extracts to the last
+                  date on file
             all dates in format "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS"
                                  As in iSnobal/AWSM   or  Alpine3D/MeteoIO
         utc_in: Optional (default = 0): UTC of the input ncfile timestamp
@@ -205,8 +211,18 @@ def swi_to_ascii(swinc, swi_x_field, swi_y_field, swi_time_field, swi_field,
     time_field_utc_out = time_field + delta_timestamp_utc
 
     # Determine time steps to export
-    ini_timestamp = pd.to_datetime(date_ini, infer_datetime_format=True)
-    end_timestamp = pd.to_datetime(date_end, infer_datetime_format=True)
+    if date_ini is None:
+        ini_timestamp = time_field_utc_out.iloc[0]
+    else:
+        ini_timestamp = pd.to_datetime(date_ini, infer_datetime_format=True)
+    print(ini_timestamp)
+
+    if date_end is None:
+        end_timestamp = time_field_utc_out.iloc[-1]
+    else:
+        end_timestamp = pd.to_datetime(date_end, infer_datetime_format=True)
+    print(end_timestamp)
+
     time_selection = (time_field_utc_out >= ini_timestamp) & \
         (time_field_utc_out <= end_timestamp)
 
@@ -249,6 +265,7 @@ def swi_to_ascii(swinc, swi_x_field, swi_y_field, swi_time_field, swi_field,
     ncfile.close()
 
 # ------------------------------------------------------------------------------
+# Function 3
 
 
 def swi_to_cactmentswi(watershed_file, swinc,
@@ -422,8 +439,7 @@ def swi_to_cactmentswi(watershed_file, swinc,
     ncfile.close()
 
 # ------------------------------------------------------------------------------
-# the idea here is to be able to provide swi and watershed defined in grids with
-# different cell sizes and extents
+# Function 4
 
 
 def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
@@ -618,103 +634,85 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
 
 
 # ------------------------------------------------------------------------------
+# Function 5
 
-# # UNFINISHED!
-# # The idea is to put in smet format for input snowmelt
-#
-# def cactmentswi_to_smet(watershed_swi_file_names, date_ini, date_end, freq_out='60min', fill_nans=True):
-#     '''
-#     Generates SMET files (Alpine3D format) containing the time series of SWI
-#     for each subwatershed (one SMET file per subwatershed) to be used as input
-#     for StreamFlow. The function compiles the data in the SWI files listed in
-#     'watershed_swi_file_names' to fill in the period between 'date_ini' and
-#     'date_end'
-#
-#     Args:
-#         watershed_swi_file_names: name of text file containing the names of the
-#                                   individual files to combine in the SMET
-#                                   files. The file must contain one filename per
-#                                   line. E.g.,
-#                                   '/path/file_1.csv
-#                                   /path/file_2.csv
-#                                   /path/file_3.csv'
-#
-#                                   input is in m^3 s^-1
-#
-#                                   Provide full path if files are not in current
-#                                   directory
-#
-#         date_ini: start date of extraction
-#         date_end: final date of extraction
-#             all dates in format "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS"
-#                                  As in iSnobal/AWSM   or  Alpine3D/MeteoIO
-#
-#         [freq_out]: time step of output (and input), e.g., '15min', '60min'
-#                     , '1440min'
-#             (default = '60min', adjust to match frequency of the input SWI)
-#
-#         [fill_nans]: option to replace nans with zeros, default: True
-#     '''
-#
-#     # Read files and store data
-#     n_files = 0
-#     swi_n_fields = []  # list
-#     swi_dict = {}  # dictionary
-#
-#     # Dataframe to fill
-#     index_df = pd.date_range(start=date_ini, end=date_end, freq='H')
-#     df_out = pd.DataFrame(data=np.zeros(len(index_df)), index=index_df,)
-#     with open(watershed_swi_file_names) as f_swi:
-#         file_names = f_swi.read().split('\n')
-#
-#     for i_files in range(len(file_names)):
-#
-#         print(file_names[i_files])
-#
-#         if os.path.isfile(file_names[i_files]) == True:
-#
-#             n_files += 1
-#             swi_data = pd.read_csv(
-#                 file_names[i_files], index_col=0)
-#             # First row includes watershed areas
-#             if n_files == 1:
-#                 swi_dict['area'] = swi_data.loc['area']
-#
-#             swi_data = swi_data[1:]
-#             swi_data.index = pd.to_datetime(swi_data.index)
-#             # the option parse_dates does not read the csv file dates to
-#             # datetime, likely because the first row has an index named 'area'
-#             swi_dict[n_files] = swi_data
-#             # used to keep track of fields in swi_dict
-#             swi_n_fields.append(n_files)
-#
-#     ini_timestamp = pd.to_datetime(date_ini, infer_datetime_format=True)
-#     end_timestamp = pd.to_datetime(date_end, infer_datetime_format=True)
-#
-#     index_series = pd.period_range(start=ini_timestamp, end=end_timestamp,
-#                                    freq=freq_out)
-#
-#     index_series = index_series.to_timestamp()
-#
-#     swi_df = pd.DataFrame(np.array([np.nan] * len(index_series)),
-#                           index=index_series, columns=['SWI'])
-#
-#     for i_catch in swi_dict['area'].index:
-#         file_name = 'catch' + str(int(i_catch)) + '.smet'
-#         # print(file_name)
-#
-#         swi_out = swi_df.copy()  # contains nans
-#
-#         for i_file in swi_n_fields:
-#
-#             index_zero = max(swi_out.index[0], swi_dict[i_file].index[0])
-#             index_end = min(swi_out.index[-1], swi_dict[i_file].index[-1])
-#
-#             print(index_zero)
-#             print(index_end)
-#
-#             print(swi_out.loc[index_zero:index_end])
-#             print(swi_dict[i_file][i_catch].loc[index_zero:index_end])
-#             swi_out['SWI'].loc[index_zero:index_end] = swi_dict[i_file][i_catch].loc[index_zero:index_end]
-#             # print(i_file)
-#             # swi_out.to_csv(file_name)
+def cactmentswi_to_smet(watershed_swi_file_names, date_ini, date_end,
+                        freq_out='H', nans_flag=-9999,
+                        filename_out='swi_compiled.csv'):
+    '''
+    Generates SMET files (Alpine3D format) containing the time series of SWI
+    for each subwatershed (one SMET file per subwatershed) to be used as input
+    for StreamFlow. The function compiles the data in the SWI files listed in
+    'watershed_swi_file_names' to fill in the period between 'date_ini' and
+    'date_end'
+
+    Args:
+        watershed_swi_file_names: name of text file containing the names of the
+                                  individual files to combine in the SMET
+                                  files. The file must contain one filename per
+                                  line. E.g.,
+                                  '/path/file_1.csv
+                                  /path/file_2.csv
+                                  /path/file_3.csv'
+
+                                  input is in m^3 s^-1
+
+                                  Provide full path if files are not in current
+                                  directory
+
+        date_ini: start date of extraction
+        date_end: final date of extraction
+            all dates in format "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS"
+                                 As in iSnobal/AWSM   or  Alpine3D/MeteoIO
+
+        freq_out: (Optional, default: '60min' or 'H') time step of output
+                  (and input), e.g., '15min', '60min', '1440min'
+                  (adjust to match frequency of the input SWI).
+                  See documentation for frequency aliases in pandas
+
+        nans_flag: (Optional, default: -9999) value (or 'NaN') to replace
+                   no-data values
+    '''
+
+    # Read files and store data
+    with open(watershed_swi_file_names) as swi_files:
+        fnames = swi_files.readlines()
+
+    print(fnames)
+
+    ls_swi = []
+
+    for fname in fnames:
+
+        fname = fname.rstrip()
+
+        print(fname)
+
+        if os.path.isfile(fname):
+
+            ls_swi.append(pd.read_csv(fname, index_col=0, header=0))
+
+    ini_timestamp = pd.to_datetime(date_ini, infer_datetime_format=True)
+    end_timestamp = pd.to_datetime(date_end, infer_datetime_format=True)
+
+    index_swi = pd.date_range(start=ini_timestamp, end=end_timestamp,
+                              freq=freq_out)
+    df_swi = pd.DataFrame(np.full((len(index_swi),
+                                   len(ls_swi[0].columns)), np.nan),
+                          index=index_swi, columns=ls_swi[0].columns)
+
+    for df in ls_swi:
+
+        df_aux = df.iloc[1:]
+        df_aux.index = pd.to_datetime(df_aux.index)
+        df_swi.loc[df_aux.index, df_aux.columns] = df_aux.values
+        # NOTE:
+        # The assignment of values in the line above IS NOT bulletproof.
+        # It requires that the indices and columns of df_aux are all contained
+        # in the indices and columns of df_swi.
+        # An Error will result if that is not the case.
+        # To avoid errors, use an earlier date_ini and later date_end to the
+        # ones contained in all files, and use the same freq_out as the ones
+        # in the input files
+
+    df_swi.to_csv(filename_out, na_rep=nans_flag)
