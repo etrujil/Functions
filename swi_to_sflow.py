@@ -28,6 +28,7 @@ def parse_extent(fname, cellsize_return=False, x_field='x', y_field='y'):
         fname: Full path point to file containing GIS information
         cellsize_return: Optional (deafault = False). True will add cellsize as the
                          last element of the return list. Option only for '.asc'
+                         and '.nc' data types
     Returns:
         extent: containing images extent in list type
         [x_ll, y_ll, x_ur, y_ur, cellsize (optional)]
@@ -157,7 +158,7 @@ def parse_extent(fname, cellsize_return=False, x_field='x', y_field='y'):
 
 
 def swi_to_ascii(swinc, swi_x_field, swi_y_field, swi_time_field, swi_field,
-                 date_zero, date_ini, date_end, convert_factor=1, utc_in=0,
+                 date_ini, date_end, convert_factor=1, utc_in=0,
                  utc_out=0):
     '''
     Converts the SWI output from iSnobal netcdf files to ascii grids
@@ -165,33 +166,24 @@ def swi_to_ascii(swinc, swi_x_field, swi_y_field, swi_time_field, swi_field,
     "YYYY-MM-DDTHH.MM.SS_ROT.asc" as in "2014-08-01T01.00.00_ROT.asc"
     ROT denotes Runoff Total in Alpine3D
     Args:
-        swinc: string with name of netcdf file generated from iSnobal/AWSM
-               in local folder "./". All output will be written in "./"
+        swinc: path of netcdf file generated from iSnobal/AWSM
         swi_x_field: name of field in "swinc" containing the x dimension
         swi_y_field: name of field in "swinc" containing the y dimension
         swi_time_field: name of field in "swinc" containing the time stamp
         swi_field: name of the field containing SWI (Surface Water Input)
                    SWI from iSNOBAL/AWSM in [kg / m^2 / timestep]
                    (or [mm / m^2 / timestep])
-        date_zero: string with the zero date (see swinc
-                   fields descriptions for the datestamp field)
-                   e.g., in AWSM swi files, description states:
-                   float time(time) ;
-                                time:units = "hours since 2014-10-01 00:00:00" ;
-                                time:time_zone = "utc" ;
-                                time:calendar = "standard" ;
-                    zero date should be '2014-10-01 00:00:00'
-        date_ini: start date for extraction from "swinc"
-        date_end: final date of extraction from "swinc"
+        date_ini: start date for extraction from "swinc" in utc_out
+        date_end: final date of extraction from "swinc" in utc_out
             all dates in format "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS"
                                  As in iSnobal/AWSM   or  Alpine3D/MeteoIO
         utc_in: Optional (default = 0): UTC of the input ncfile timestamp
                 (e.g.,0 for UTC+0)
         utc_out: Optional (default = 0): desired UTC for the output files
                 (e.g.,-7 for UTC-7)
-        convert_factor: convertion factor from input units to mm / m^2
+        convert_factor: convertion factor from input units to mm.
                         Typically, SWI input from iSNOBAL/AWSM is in
-                        [mm m^-2 timestep^-1] or [kg m^-2 timestep^-1]
+                        [mm timestep^-1] or [kg m^-2 timestep^-1]
                         This convertion factor only applies to depth
                         e.g., default = 1 (from mm to mm). Use 0.001 from m to mm
         nans will be replaced with zero values
@@ -199,50 +191,36 @@ def swi_to_ascii(swinc, swi_x_field, swi_y_field, swi_time_field, swi_field,
     '''
 
     # Reading in data from files and extracting said data
-    swi_dataset = os.path.abspath('./' + swinc)
-    ncfile = nc.Dataset(swi_dataset, 'r')
+    ncfile = nc.Dataset(swinc, 'r')
 
     # Extract fields of interest
     x_vector = ncfile.variables[swi_x_field][:]
     y_vector = ncfile.variables[swi_y_field][:]
-    time_field = ncfile.variables[swi_time_field][:]  # time field comes in hrs
+    time_field = nc.num2date(ncfile.variables[swi_time_field][:],
+                             units=ncfile.variables[swi_time_field].units,
+                             calendar=ncfile.variables[swi_time_field].calendar)
+
+    delta_hours = (time_field[1] - time_field[0]).total_seconds()/3600
+    delta_timestamp_utc = timedelta(hours=int(utc_out - utc_in))
+    time_field_utc_out = time_field + delta_timestamp_utc
 
     # Determine time steps to export
-    zero_timestamp = pd.to_datetime(date_zero, infer_datetime_format=True)
     ini_timestamp = pd.to_datetime(date_ini, infer_datetime_format=True)
     end_timestamp = pd.to_datetime(date_end, infer_datetime_format=True)
-    delta_hours = time_field[1] - time_field[0]
-    delta_timestamp = timedelta(hours=int(delta_hours))
-    delta_timestamp_utc = timedelta(hours=int(utc_out - utc_in))
+    time_selection = (time_field_utc_out >= ini_timestamp) & \
+        (time_field_utc_out <= end_timestamp)
 
-    # Indices for data extraction
-    ini_index = np.floor((ini_timestamp - zero_timestamp) / delta_timestamp)
-    if ini_index < 0:
-        print('Initial date prior to initial date on file, '
-              + 'date reset to initial date on file')
-        ini_index = 0
-    elif ini_index > len(time_field):
-        print('Initial date after final date on file, '
-              + 'check initial date and re-run')
+    if not time_selection.any():
+        print("Please check that selected dates for extraction are correct, no output was produced")
         return None
-
-    end_index = np.ceil((end_timestamp - zero_timestamp) / delta_timestamp)
-    if end_index < ini_index:
-        print('Final date prior to initial date, '
-              + 'date reset to match initial date')
-        end_index = ini_index
-    elif end_index >= len(time_field):
-        print('Final date after final date of file, '
-              + 'date reset to match final date on file')
-        end_index = len(time_field) - 1
 
     n_x = len(x_vector)
     n_y = len(y_vector)
     # Be careful if coordinate system is lat-lon and southern hemisphere, etc.
     # Input fields should be in projected coords (in meters)
-    x_ll = x_vector.min()
-    y_ll = y_vector.min()
-    cell_size = (x_vector[1]-x_vector[0])
+    [x_ll, y_ll, x_ur, y_ur, dx, dy] = parse_extent(
+        swinc, cellsize_return=True, x_field='x', y_field='y')
+    cell_size = dx
 
     # Create header for file
     header = "ncols %s\n" % n_x
@@ -252,15 +230,15 @@ def swi_to_ascii(swinc, swi_x_field, swi_y_field, swi_time_field, swi_field,
     header += "cellsize %s\n" % cell_size
     header += "NODATA_value -999"
 
+    index_select = np.asarray(list(range(len(time_field))))[time_selection]
+
     # Loop through dates and create files
-    for i_files in range(int(ini_index), int(end_index+1)):
-        swi_matrix = ncfile.variables[swi_field][i_files, :, :]
-        # in case timestep is more than one hr
+    for i_file in index_select:
+        swi_matrix = ncfile.variables[swi_field][i_file, :, :]
+        # in case timestep is more or less than one hr
         swi_matrix *= (convert_factor/delta_hours)
         swi_matrix[np.isnan(swi_matrix)] = 0.0
-        i_timestamp = (zero_timestamp
-                       + i_files*delta_timestamp
-                       + delta_timestamp_utc)
+        i_timestamp = time_field_utc_out[i_file]
 
         # Alpine3D name convention for Runoff Total (ROT)
         file_name_swi = i_timestamp.strftime('%Y-%m-%dT%H.%M.%S_ROT.asc')
@@ -275,8 +253,8 @@ def swi_to_ascii(swinc, swi_x_field, swi_y_field, swi_time_field, swi_field,
 
 def swi_to_cactmentswi(watershed_file, swinc,
                        swi_x_field,
-                       swi_y_field, swi_time_field, swi_field, date_zero,
-                       date_ini, date_end, convert_factor=0.001, utc_in=0,
+                       swi_y_field, swi_time_field, swi_field,
+                       date_ini=None, date_end=None, convert_factor=0.001, utc_in=0,
                        utc_out=0, output_option=1,
                        filename_out='watershed_swi_flow.csv'):
     '''
@@ -284,7 +262,8 @@ def swi_to_cactmentswi(watershed_file, swinc,
     catchment in a txt file. The file is organized to have the area of each
     catchment and a time series of SWI per catchment (see description below)
     Args:
-        watershed_file: full path of ascii grid file defining the watersheds over
+        watershed_file: full path of ascii grid ('.asc') or
+                        GTiff ('.tif') file defining the watersheds over
                         which to calculate total SWI,
                         grid in file needs to coincide with grid
                         in SWI files. Units of gridcell in meters
@@ -303,19 +282,15 @@ def swi_to_cactmentswi(watershed_file, swinc,
         swi_field: name of the field containing SWI (Surface Water Input)
                    SWI from iSNOBAL/AWSM in [kg / m^2 / timestep]
                    (or [mm / m^2 / timestep])
-        date_zero: string with the zero date (see swinc
-                   fields descriptions for the datestamp field)
-                   e.g., in AWSM swi files, description states:
-                   float time(time) ;
-                                time:units = "hours since 2014-10-01 00:00:00" ;
-                                time:time_zone = "utc" ;
-                                time:calendar = "standard" ;
-                    zero date should be '2014-10-01 00:00:00'
-        date_ini: start date for extraction from "swinc"
-        date_end: final date of extraction from "swinc"
+        date_ini: Optional (default = None): start date for extraction
+                  from "swinc" in utc_out. If None, extracts from the first
+                  date on file
+        date_end: Optional (default = None): final date of extraction
+                  from "swinc" in utc_out. If None, extracts to the last
+                  date on file
             all dates in format "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS"
                                  As in iSnobal/AWSM   or  Alpine3D/MeteoIO
-        convert_factor: Optional (default = 0.001) convertion factor from input
+        convert_factor: Optional (default = 0.001): convertion factor from input
                         units to desired output units
                         The default of 0.001 is from mm-SWI to m-SWI
                         nans will be replaced with zero values
@@ -338,58 +313,58 @@ def swi_to_cactmentswi(watershed_file, swinc,
     '''
 
     # Reading in data from files and extracting said data
-    # watershed_path = os.path.abspath('./' + watershed_file)
-    # Uncomment line above and comment line below to use local path
-    watershed_path = watershed_file
-    watershed_grid = np.loadtxt(watershed_path, skiprows=6)
-    # swi_dataset = os.path.abspath('./' + swinc)
-    swi_dataset = swinc
-    # Uncomment line above and comment line below to use local path
-    ncfile = nc.Dataset(swi_dataset, 'r')
+
+    if '.tif' in watershed_file.lower():
+        watershed_grid = io.imread(watershed_file)
+    elif '.asc' in watershed_file.lower():
+        watershed_grid = np.loadtxt(watershed_file, skiprows=6)
+    else:
+        print('Error: unrecognized format of watershed_file, please use .asc or .tif')
+        return None
+
+    ncfile = nc.Dataset(swinc, 'r')
 
     # Extract fields of interest
     x_vector = ncfile.variables[swi_x_field][:]
     y_vector = ncfile.variables[swi_y_field][:]
-    time_field = ncfile.variables[swi_time_field][:]
+    time_field = pd.Series(
+        nc.num2date(ncfile.variables[swi_time_field][:],
+                    units=ncfile.variables[swi_time_field].units,
+                    calendar=ncfile.variables[swi_time_field].calendar)
+    ).dt.round('S')
+
+    delta_hours = (time_field[1] - time_field[0]).total_seconds()/3600
+    delta_timestamp_utc = timedelta(hours=int(utc_out - utc_in))
+    time_field_utc_out = time_field + delta_timestamp_utc
 
     # Determine time steps to export
-    zero_timestamp = pd.to_datetime(date_zero, infer_datetime_format=True)
-    ini_timestamp = pd.to_datetime(date_ini, infer_datetime_format=True)
-    end_timestamp = pd.to_datetime(date_end, infer_datetime_format=True)
-    delta_hours = time_field[1] - time_field[0]
-    delta_timestamp = timedelta(hours=int(delta_hours))
-    delta_timestamp_utc = timedelta(hours=int(utc_out - utc_in))
+    if date_ini is None:
+        ini_timestamp = time_field_utc_out.iloc[0]
+    else:
+        ini_timestamp = pd.to_datetime(date_ini, infer_datetime_format=True)
+    print(ini_timestamp)
 
-    # Indices for data extraction
-    ini_index = np.floor((ini_timestamp - zero_timestamp) / delta_timestamp)
-    if ini_index < 0:
-        print('Initial date prior to initial date on file, '
-              + 'date reset to initial date on file')
-        ini_index = 0
-    elif ini_index > len(time_field):
-        print('Initial date after final date on file, '
-              + 'check initial date and re-run')
+    if date_end is None:
+        end_timestamp = time_field_utc_out.iloc[-1]
+    else:
+        end_timestamp = pd.to_datetime(date_end, infer_datetime_format=True)
+    print(end_timestamp)
+
+    time_selection = (time_field_utc_out >= ini_timestamp) & \
+        (time_field_utc_out <= end_timestamp)
+    time_selection = time_selection.values
+
+    if not time_selection.any():
+        print("Please check that selected dates for extraction are correct, no output was produced")
         return None
-
-    end_index = np.ceil((end_timestamp - zero_timestamp) / delta_timestamp)
-    if end_index < ini_index:
-        print('Final date prior to initial date, '
-              + 'date reset to match initial date')
-        end_index = ini_index
-    elif end_index >= len(time_field):
-        print('Final date after final date of file, '
-              + 'date reset to match final date on file')
-        end_index = len(time_field) - 1
 
     n_x = len(x_vector)
     n_y = len(y_vector)
     # Be careful if coordinate system is lat-lon and southern hemisphere, etc.
-    # Should be in meters (projected coordinate system)
-    x_ll = x_vector.min()
-    y_ll = y_vector.min()
-    cell_size = (x_vector[1]-x_vector[0])  # in meters
-
-    time_zone = utc_out - utc_in
+    # Input fields should be in projected coords (in meters)
+    [x_ll, y_ll, x_ur, y_ur, dx, dy] = parse_extent(
+        swinc, cellsize_return=True, x_field='x', y_field='y')
+    cell_size = dx
 
     # determine watershed indices
     watershed_unique = np.unique(watershed_grid, return_counts=True)
@@ -403,16 +378,17 @@ def swi_to_cactmentswi(watershed_file, swinc,
     swi_timeseries = pd.DataFrame(
         watershed_area.area.values, index=watershed_numbers, columns=['area'])
 
-    # Loop through dates and create files
-    for i_files in range(int(ini_index), int(end_index+1)):
+    index_select = np.asarray(list(range(len(time_field))))[
+        time_selection]
 
-        swi_matrix = ncfile.variables[swi_field][i_files, :, :]
+    # Loop through dates and create files
+    for i_file in index_select:
+
+        swi_matrix = ncfile.variables[swi_field][i_file, :, :]
         swi_matrix *= convert_factor  # should give m SWI
-        # (or m m^-2 per time step)
+        # (or m per time step) with default convert_factor
         swi_matrix[np.isnan(swi_matrix)] = 0.0
-        i_timestamp = (zero_timestamp
-                       + i_files*delta_timestamp
-                       + delta_timestamp_utc)
+        i_timestamp = time_field_utc_out[i_file]
 
         swi_volume = pd.DataFrame(np.array(
             [np.nan] * len(watershed_numbers)), index=watershed_numbers,
@@ -446,15 +422,15 @@ def swi_to_cactmentswi(watershed_file, swinc,
     ncfile.close()
 
 # ------------------------------------------------------------------------------
-# UNFINISHED
 # the idea here is to be able to provide swi and watershed defined in grids with
 # different cell sizes and extents
 
 
 def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
                                  swi_x_field,
-                                 swi_y_field, swi_time_field, swi_field, date_zero,
-                                 date_ini, date_end, convert_factor=0.001, utc_in=0,
+                                 swi_y_field, swi_time_field, swi_field,
+                                 date_ini=None, date_end=None,
+                                 convert_factor=0.001, utc_in=0,
                                  utc_out=0, output_option=1,
                                  filename_out='watershed_swi_flow.csv'):
     '''
@@ -462,7 +438,8 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
     catchment in a txt file. The file is organized to have the area of each
     catchment and a time series of SWI per catchment (see description below)
     Args:
-        watershed_file: full path of ascii grid file defining the watersheds over
+        watershed_file: full path of ascii grid ('.asc') or
+                        GTiff ('.tif') file defining the watersheds over
                         which to calculate total SWI,
                         grid in file does not need to coincide with grid
                         in SWI files. Units of gridcell in meters
@@ -481,16 +458,12 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
         swi_field: name of the field containing SWI (Surface Water Input)
                    SWI from iSNOBAL/AWSM in [kg / m^2 / timestep]
                    (or [mm / m^2 / timestep])
-        date_zero: string with the zero date (see swinc
-                   fields descriptions for the datestamp field)
-                   e.g., in AWSM swi files, description states:
-                   float time(time) ;
-                                time:units = "hours since 2014-10-01 00:00:00" ;
-                                time:time_zone = "utc" ;
-                                time:calendar = "standard" ;
-                    zero date should be '2014-10-01 00:00:00'
-        date_ini: start date for extraction from "swinc"
-        date_end: final date of extraction from "swinc"
+        date_ini: Optional (default = None): start date for extraction
+                  from "swinc" in utc_out. If None, extracts from the first
+                  date on file
+        date_end: Optional (default = None): final date of extraction
+                  from "swinc" in utc_out. If None, extracts to the last
+                  date on file
             all dates in format "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS"
                                  As in iSnobal/AWSM   or  Alpine3D/MeteoIO
         convert_factor: Optional (default = 0.001) convertion factor from input
@@ -529,7 +502,6 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
     run_arg = 'gdalwarp -te ' + swi_window_str + ' -of GTiff ' +\
         '-tr ' + str(swi_extent[4]) + ' ' + str(swi_extent[5]) +\
         ' -r near -overwrite ' + watershed_file + ' wfile_proj.tif'
-    print(run_arg)
     run(run_arg, shell=True)
 
     # Input watershed definition grid
@@ -539,93 +511,95 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
     ncfile = nc.Dataset(swinc, 'r')
 
     shape_wfile = np.shape(watershed_grid)
-    print('Size of watershed definition field is {}'.format(shape_wfile))
     shape_nc = np.shape(ncfile.variables[swi_field][0])
-    print('Size of SWI fields is {}'.format(shape_nc))
+
+    if not ((shape_wfile[0] == shape_nc[0])
+            and (shape_wfile[1] == shape_nc[1])):
+        print('Matrix sizes of watershed definition file and swi file after '
+              + 'reprojection are not the same, check and re-run')
+        return None
 
     # Extract fields of interest
     x_vector = ncfile.variables[swi_x_field][:]
     y_vector = ncfile.variables[swi_y_field][:]
-    print('min and max x are {} and {}, respectively. len of x is {}'.format(
-        min(x_vector), max(x_vector), len(x_vector)))
-    print('min and max y are {} and {}, respectively. len of y is {}'.format(
-        min(y_vector), max(y_vector), len(y_vector)))
-    time_field = ncfile.variables[swi_time_field][:]
 
-    if not ((shape_wfile[0] == shape_nc[0])
-            and (shape_wfile[1] == shape_nc[1])):
-        print('Matrix size of watershed definition file and swi file after '
-              + 'reprojection is not the same, check and re-run')
-        return None
+    time_field = pd.Series(
+        nc.num2date(ncfile.variables[swi_time_field][:],
+                    units=ncfile.variables[swi_time_field].units,
+                    calendar=ncfile.variables[swi_time_field].calendar)
+    ).dt.round('S')
+
+    delta_hours = (time_field[1] - time_field[0]).total_seconds()/3600
+    delta_timestamp_utc = timedelta(hours=int(utc_out - utc_in))
+    time_field_utc_out = time_field + delta_timestamp_utc
 
     # Determine time steps to export
-    zero_timestamp = pd.to_datetime(date_zero, infer_datetime_format=True)
-    ini_timestamp = pd.to_datetime(date_ini, infer_datetime_format=True)
-    end_timestamp = pd.to_datetime(date_end, infer_datetime_format=True)
-    delta_hours = time_field[1] - time_field[0]
-    delta_timestamp = timedelta(hours=int(delta_hours))
-    delta_timestamp_utc = timedelta(hours=int(utc_out - utc_in))
+    if date_ini is None:
+        ini_timestamp = time_field_utc_out.iloc[0]
+    else:
+        ini_timestamp = pd.to_datetime(date_ini, infer_datetime_format=True)
+    print(ini_timestamp)
 
-    # Indices for data extraction
-    ini_index = np.floor((ini_timestamp - zero_timestamp) / delta_timestamp)
-    if ini_index < 0:
-        print('Initial date prior to initial date on file, '
-              + 'date reset to initial date on file')
-        ini_index = 0
-    elif ini_index > len(time_field):
-        print('Initial date after final date on file, '
-              + 'check initial date and re-run')
+    if date_end is None:
+        end_timestamp = time_field_utc_out.iloc[-1]
+    else:
+        end_timestamp = pd.to_datetime(date_end, infer_datetime_format=True)
+    print(end_timestamp)
+
+    time_selection = (time_field_utc_out >= ini_timestamp) & \
+        (time_field_utc_out <= end_timestamp)
+    time_selection = time_selection.values
+
+    if not time_selection.any():
+        print("Please check that selected dates for extraction are correct, no output was produced")
         return None
 
-    end_index = np.ceil((end_timestamp - zero_timestamp) / delta_timestamp)
-    if end_index < ini_index:
-        print('Final date prior to initial date, '
-              + 'date reset to match initial date')
-        end_index = ini_index
-    elif end_index >= len(time_field):
-        print('Final date after final date of file, '
-              + 'date reset to match final date on file')
-        end_index = len(time_field) - 1
-
-    # Offset in time to write SWI timeseries
-    time_zone = utc_out - utc_in
+    n_x = len(x_vector)
+    n_y = len(y_vector)
+    # Be careful if coordinate system is lat-lon and southern hemisphere, etc.
+    # Input fields should be in projected coords (in meters)
+    [x_ll, y_ll, x_ur, y_ur, dx, dy] = parse_extent(
+        swinc, cellsize_return=True, x_field='x', y_field='y')
+    cell_size = dx  # assuming dx == dy
 
     # determine watershed indices
     watershed_unique = np.unique(watershed_grid, return_counts=True)
     watershed_area = pd.DataFrame(watershed_unique[1][watershed_unique[0] > 0],
-                                  index=watershed_unique[0][watershed_unique[0] > 0], columns=['area'])
+                                  index=watershed_unique[0][watershed_unique[0] > 0],
+                                  columns=['area'])
     watershed_numbers = watershed_unique[0][watershed_unique[0] > 0]
     watershed_numbers = watershed_numbers.astype(int)
-    watershed_area.area = watershed_area.area * swi_dx * swi_dy
+    watershed_area.area = watershed_area.area * cell_size * cell_size
 
     swi_timeseries = pd.DataFrame(
         watershed_area.area.values, index=watershed_numbers, columns=['area'])
 
-    # Loop through dates and create files
-    for i_time in range(int(ini_index), int(end_index+1)):
+    index_select = np.asarray(list(range(len(time_field))))[time_selection]
 
-        swi_matrix = ncfile.variables[swi_field][i_time, :, :]
+    # Loop through dates and create files
+    for i_file in index_select:
+
+        swi_matrix = ncfile.variables[swi_field][i_file, :, :]
         swi_matrix *= convert_factor  # should give m SWI
-        # (or m per time step)
+        # (or m per time step) with default convert_factor
         swi_matrix[np.isnan(swi_matrix)] = 0.0
-        i_timestamp = (zero_timestamp
-                       + i_time*delta_timestamp
-                       + delta_timestamp_utc)
+        i_timestamp = time_field_utc_out[i_file]
 
         swi_volume = pd.DataFrame(np.array(
-            [np.nan] * len(watershed_numbers)), index=watershed_numbers, columns=[i_timestamp])
+            [np.nan] * len(watershed_numbers)), index=watershed_numbers,
+            columns=[i_timestamp])
 
         for i_catch in watershed_numbers:
 
-            swi_volume.at[i_catch, i_timestamp] = (swi_matrix[watershed_grid == i_catch].sum()
-                                                   * swi_dx * swi_dy
-                                                   / (delta_hours * 3600.))
+            swi_volume.at[i_catch, i_timestamp] = \
+                (swi_matrix[watershed_grid == i_catch].sum()
+                 * cell_size * cell_size
+                 / (delta_hours * 3600.))
             # Output in m^3 s^-1
 
         swi_timeseries[i_timestamp] = swi_volume.loc[:, i_timestamp].values
 
     swi_timeseries = swi_timeseries.T
-    swi_timeseries.to_csv(filename_out)
 
     # Output
     if output_option == 0:
@@ -645,8 +619,8 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
 
 # ------------------------------------------------------------------------------
 
-# UNFINISHED!
-# The idea is to put in smet format for input snowmelt
+# # UNFINISHED!
+# # The idea is to put in smet format for input snowmelt
 #
 # def cactmentswi_to_smet(watershed_swi_file_names, date_ini, date_end, freq_out='60min', fill_nans=True):
 #     '''
@@ -661,9 +635,9 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
 #                                   individual files to combine in the SMET
 #                                   files. The file must contain one filename per
 #                                   line. E.g.,
-#                                   'file_1.csv
-#                                   file_2.csv
-#                                   file_3.csv'
+#                                   '/path/file_1.csv
+#                                   /path/file_2.csv
+#                                   /path/file_3.csv'
 #
 #                                   input is in m^3 s^-1
 #
@@ -694,6 +668,8 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
 #         file_names = f_swi.read().split('\n')
 #
 #     for i_files in range(len(file_names)):
+#
+#         print(file_names[i_files])
 #
 #         if os.path.isfile(file_names[i_files]) == True:
 #
