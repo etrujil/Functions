@@ -239,11 +239,11 @@ def swi_to_ascii(swinc, swi_x_field, swi_y_field, swi_time_field, swi_field,
     cell_size = dx
 
     # Create header for file
-    header = "ncols %s\n" % n_x
-    header += "nrows %s\n" % n_y
-    header += "xllcorner %s\n" % x_ll
-    header += "yllcorner %s\n" % y_ll
-    header += "cellsize %s\n" % cell_size
+    header = "ncols {}\n".format(n_x)
+    header += "nrows {}\n".format(n_y)
+    header += "xllcorner {}\n".format(x_ll)
+    header += "yllcorner {}\n".format(y_ll)
+    header += "cellsize {}\n".format(cell_size)
     header += "NODATA_value -999"
 
     index_select = np.asarray(list(range(len(time_field))))[time_selection]
@@ -268,12 +268,12 @@ def swi_to_ascii(swinc, swi_x_field, swi_y_field, swi_time_field, swi_field,
 # Function 3
 
 
-def swi_to_cactmentswi(watershed_file, swinc,
-                       swi_x_field,
-                       swi_y_field, swi_time_field, swi_field,
-                       date_ini=None, date_end=None, convert_factor=0.001, utc_in=0,
-                       utc_out=0, output_option=1,
-                       filename_out='watershed_swi_flow.csv'):
+def swi_to_catchmentswi(watershed_file, swinc,
+                        swi_x_field,
+                        swi_y_field, swi_time_field, swi_field,
+                        date_ini=None, date_end=None, convert_factor=0.001, utc_in=0,
+                        utc_out=0, output_option=1,
+                        filename_out='watershed_swi_flow.csv'):
     '''
     Converts the SWI output from iSnobal netcdf files to time series per
     catchment in a txt file. The file is organized to have the area of each
@@ -442,13 +442,13 @@ def swi_to_cactmentswi(watershed_file, swinc,
 # Function 4
 
 
-def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
-                                 swi_x_field,
-                                 swi_y_field, swi_time_field, swi_field,
-                                 date_ini=None, date_end=None,
-                                 convert_factor=0.001, utc_in=0,
-                                 utc_out=0, output_option=1,
-                                 filename_out='watershed_swi_flow.csv'):
+def swi_to_catchmentswi_diff_grid(watershed_file, swinc,
+                                  swi_x_field,
+                                  swi_y_field, swi_time_field, swi_field,
+                                  date_ini=None, date_end=None,
+                                  convert_factor=0.001, utc_in=0,
+                                  utc_out=0, output_option=1,
+                                  filename_out='watershed_swi_flow.csv'):
     '''
     Converts the SWI output from iSnobal netcdf files to time series per
     catchment in a txt file. The file is organized to have the area of each
@@ -632,19 +632,109 @@ def swi_to_cactmentswi_diff_grid(watershed_file, swinc,
 
     ncfile.close()
 
-
 # ------------------------------------------------------------------------------
 # Function 5
 
-def cactmentswi_to_smet(watershed_swi_file_names, date_ini, date_end,
-                        freq_out='H', nans_flag=-9999,
-                        filename_out='swi_compiled.csv'):
+
+def catchmentswi_complile(watershed_swi_file_names, date_ini, date_end,
+                          freq_out='H', nans_flag=-9999,
+                          filename_out='swi_compiled.csv'):
+    '''
+    Compiles the files containing the time series of SWI per year or other time
+    period into a single 'csv' file. The function compiles the data in
+    the SWI files listed in 'watershed_swi_file_names' to fill in the period
+    between 'date_ini' and 'date_end'.
+
+    Args:
+        watershed_swi_file_names: name of text file containing the names of the
+                                  individual files to combine in the SMET
+                                  files. The file must contain one filename per
+                                  line. E.g.,
+                                  '/path/file_1.csv
+                                  /path/file_2.csv
+                                  /path/file_3.csv'
+
+                                  input is in m^3 s^-1
+
+                                  Provide full path if files are not in current
+                                  directory
+
+        date_ini: start date of extraction
+        date_end: final date of extraction
+            all dates in format "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DDTHH:MM:SS"
+                                 As in iSnobal/AWSM   or  Alpine3D/MeteoIO
+
+        freq_out: (Optional, default: '60min' or 'H') time step of output
+                  (and input), e.g., '15min', '60min', '1440min'
+                  (adjust to match frequency of the input SWI).
+                  See documentation for frequency aliases in pandas
+
+        nans_flag: (Optional, default: -9999) value (or 'NaN') to replace
+                   no-data values
+
+    Returns:
+        filename_out: (Optional, default: 'swi_compiled.csv')
+                      file name (full path) with the compiled time series
+                      of SWI.
+                      The Watershed are is included as the last line in output
+                      file
+                      (output units are the same those in input files)
+    '''
+
+    # Read files and store data
+    with open(watershed_swi_file_names) as swi_files:
+        fnames = swi_files.readlines()
+
+    ls_swi = []
+
+    for fname in fnames:
+
+        fname = fname.rstrip()
+
+        if os.path.isfile(fname):
+
+            ls_swi.append(pd.read_csv(fname, index_col=0, header=0))
+
+    ini_timestamp = pd.to_datetime(date_ini, infer_datetime_format=True)
+    end_timestamp = pd.to_datetime(date_end, infer_datetime_format=True)
+
+    index_swi = pd.date_range(start=ini_timestamp, end=end_timestamp,
+                              freq=freq_out)
+    df_swi = pd.DataFrame(np.full((len(index_swi),
+                                   len(ls_swi[0].columns)), np.nan),
+                          index=index_swi, columns=ls_swi[0].columns)
+    df_area = ls_swi[0].loc['area']  # include area in the output
+
+    for df in ls_swi:
+
+        df_aux = df.iloc[1:]
+        df_aux.index = pd.to_datetime(df_aux.index)
+        df_swi.loc[df_aux.index, df_aux.columns] = df_aux.values
+        # NOTE:
+        # The assignment of values in the line above IS NOT bulletproof.
+        # It requires that the indices and columns of df_aux are all contained
+        # in the indices and columns of df_swi.
+        # An Error will result if that is not the case.
+        # To avoid errors, use an earlier date_ini and later date_end to the
+        # ones contained in all files, and use the same freq_out as the ones
+        # in the input files
+
+    df_out = df_swi.append(df_area)
+    df_out.to_csv(filename_out, na_rep=nans_flag)
+
+
+# ------------------------------------------------------------------------------
+# Function 6
+
+def catchmentswi_to_smet(watershed_swi_file_names, date_ini, date_end,
+                         freq_out='H', nans_flag=-9999, utc=0,
+                         fpath_out=''):
     '''
     Generates SMET files (Alpine3D format) containing the time series of SWI
     for each subwatershed (one SMET file per subwatershed) to be used as input
     for StreamFlow. The function compiles the data in the SWI files listed in
     'watershed_swi_file_names' to fill in the period between 'date_ini' and
-    'date_end'
+    'date_end'.
 
     Args:
         watershed_swi_file_names: name of text file containing the names of the
@@ -674,19 +764,19 @@ def cactmentswi_to_smet(watershed_swi_file_names, date_ini, date_end,
                    no-data values
     '''
 
+    catchmentswi_complile(watershed_swi_file_names, date_ini, date_end,
+                          freq_out='H', nans_flag=-9999,
+                          filename_out='swi_compiled.csv')
+
     # Read files and store data
     with open(watershed_swi_file_names) as swi_files:
         fnames = swi_files.readlines()
-
-    print(fnames)
 
     ls_swi = []
 
     for fname in fnames:
 
         fname = fname.rstrip()
-
-        print(fname)
 
         if os.path.isfile(fname):
 
@@ -700,6 +790,8 @@ def cactmentswi_to_smet(watershed_swi_file_names, date_ini, date_end,
     df_swi = pd.DataFrame(np.full((len(index_swi),
                                    len(ls_swi[0].columns)), np.nan),
                           index=index_swi, columns=ls_swi[0].columns)
+
+    df_area = ls_swi[0].loc['area']
 
     for df in ls_swi:
 
@@ -715,4 +807,32 @@ def cactmentswi_to_smet(watershed_swi_file_names, date_ini, date_end,
         # ones contained in all files, and use the same freq_out as the ones
         # in the input files
 
-    df_swi.to_csv(filename_out, na_rep=nans_flag)
+    n_rows = df.shape[0]
+    df_swi[df_swi != nans_flag] = df_swi[df_swi !=
+                                         nans_flag] * 3600  # now in m^3 hr^-1
+
+    for catch in df_swi.columns:
+
+        header_smet = 'SMET 1.1 ASCII\n'
+        header_smet += '[HEADER]\n'
+        header_smet += 'station_id = catch{}\n'.format(int(catch))
+        header_smet += 'station_name = catch{}\n'.format(int(catch))
+        header_smet += 'latitude = {}\n'.format(nans_flag)
+        header_smet += 'longitude = {}\n'.format(nans_flag)
+        header_smet += 'altitude = {}\n'.format(nans_flag)
+        header_smet += 'catchment_surface = {:.3f}\n'.format(
+            df_area.loc[catch] * 1e-6)
+        header_smet += 'comment = surface is in km^2, runoff (Ro) in m^3/h\n'
+        header_smet += 'nodata = {}\n'.format(nans_flag)
+        header_smet += 'tz = {}\n'.format(utc)
+        header_smet += 'fields = timestamp total_Ro\n'
+        header_smet += '[DATA]\n'
+
+        with open(fpath_out + 'catch{}'.format(catch) + '.smet', 'w') as swi_fobject:
+
+            swi_fobject.write(header_smet)
+
+        df_swi.to_csv(fpath_out + 'catch{}'.format(catch) + '.smet',
+                      date_format='%Y-%m-%dT%H:%M:%S', na_rep=str(nans_flag),
+                      sep=' ', columns=[catch], mode='a', header=False,
+                      float_format='%.3f')
