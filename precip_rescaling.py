@@ -1,6 +1,10 @@
+#!/usr/bin/env python3
+
+import argparse
 import netCDF4 as nc
 import numpy as np
 from subprocess import run
+from skimage import io
 
 
 def snowfall_rescaling_timestep(precip_np, snow_fraction_np, snow_map_np):
@@ -66,7 +70,7 @@ def snowfall_rescaling_timestep(precip_np, snow_fraction_np, snow_map_np):
 # using the 'snowfall_rescaling_timestep' function above
 
 
-def snowfall_rescaling(precip_path, percent_snow_path, precip_field, snow_percent_field, snow_map_np):
+def snowfall_rescaling(precip_path, percent_snow_path, snow_map_path, precip_field='precip', snow_percent_field='percent_snow'):
     '''
     Parameters:
         precip_path: full path of NetCDF4 file with the precipitation information
@@ -86,6 +90,8 @@ def snowfall_rescaling(precip_path, percent_snow_path, precip_field, snow_percen
 
     run('cp ' + precip_path + ' precip_rescaled.nc', shell=True)
     run('cp ' + percent_snow_path + ' percent_snow_rescaled.nc', shell=True)
+
+    snow_map_np = io.imread(snow_map_path)
 
     precip_nc = nc.Dataset('precip_rescaled.nc', 'r+')
     percent_nc = nc.Dataset('percent_snow_rescaled.nc', 'r+')
@@ -110,4 +116,37 @@ def snowfall_rescaling(precip_path, percent_snow_path, precip_field, snow_percen
     precip_nc.close()
     percent_nc.close()
 
-    return precip_rescaled, percent_rescaled, rescaling_flag
+    # return None
+    # precip_rescaled, percent_rescaled, rescaling_flag
+
+
+def main():
+    p = argparse.ArgumentParser(description='Generates rescaled precipitation'
+                                ' files for SMRF/AWSM')
+
+    p.add_argument("-p", "--precip", dest="precip_path",
+                   required=True, type=str,
+                   help="Path to precip.nc")
+    p.add_argument("-ps", "--percentsnow", dest="percent_snow_path",
+                   required=True, type=str,
+                   help="Path to percent_snow.nc")
+    p.add_argument("-sm", "--snowmap", dest="snow_map_path",
+                   required=True, type=str,
+                   help="Path to snow map/snow distribution .tif file")
+    p.add_argument("-pf", "--precipfield", dest="precip_field",
+                   default="precip", type=str,
+                   help="name of precip field in precip.nc"
+                   ", default=precip")
+    p.add_argument("-spf", "--percentfield", dest="snow_percent_field",
+                   default="percent_snow", type=str,
+                   help="name of the snow percent field in snow_percent.nc"
+                   ", default=percent_snow")
+    args = p.parse_args()
+
+    snowfall_rescaling(args.precip_path, args.percent_snow_path,
+                       args.snow_map_path, args.precip_field,
+                       args.snow_percent_field)
+
+
+if __name__ == '__main__':
+    main()
