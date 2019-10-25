@@ -95,23 +95,30 @@ def snowfall_rescaling(precip_path, percent_snow_path, snow_map_path, precip_fie
 
     precip_nc = nc.Dataset('precip_rescaled.nc', 'r+')
     percent_nc = nc.Dataset('percent_snow_rescaled.nc', 'r+')
-
-    precip_rescaled = np.zeros(
-        precip_nc.variables[precip_field].shape, dtype=float)
-    percent_rescaled = np.zeros(
-        percent_nc.variables[snow_percent_field].shape, dtype=float)
+    #
+    # precip_rescaled = np.zeros(
+    #     precip_nc.variables[precip_field].shape, dtype=float)
+    # percent_rescaled = np.zeros(
+    #     percent_nc.variables[snow_percent_field].shape, dtype=float)
     rescaling_flag = np.empty(
         precip_nc.variables[precip_field].shape[0], dtype=bool)
 
     for i_time in range(len(rescaling_flag)):
 
-        precip_rescaled[i_time, :, :], percent_rescaled[i_time, :, :], rescaling_flag[i_time] = \
+        precip_rescaled_aux, percent_rescaled_aux, rescaling_flag[i_time] = \
             snowfall_rescaling_timestep(precip_nc.variables[precip_field][i_time, :, :],
                                         percent_nc.variables[snow_percent_field][i_time, :, :],
                                         snow_map_np)
+        precip_nc.variables[precip_field][i_time,
+                                          :, :] = precip_rescaled_aux
+        percent_nc.variables[snow_percent_field][i_time,
+                                                 :, :] = percent_rescaled_aux
 
-    precip_nc.variables[precip_field][:] = precip_rescaled
-    percent_nc.variables[snow_percent_field][:] = percent_rescaled
+        # precip_nc.sync()
+        # percent_nc.sync()
+
+    # precip_nc.variables[precip_field][:] = precip_rescaled
+    # percent_nc.variables[snow_percent_field][:] = percent_rescaled
 
     precip_nc.close()
     percent_nc.close()
