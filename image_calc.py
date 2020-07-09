@@ -49,14 +49,17 @@ def get_extent(fname, x_field='x', y_field='y'):
 
         for l in parse_list:
             if 'pixel size' in l.lower():
-                for w in l.split(' '):
-                    try:
-                        if len(extent) <= 5:
-                            parseable = \
-                                ''.join(c for c in w if c not in ' ,()\n')
-                            extent.append(float(parseable))
-                    except:
-                        pass
+                
+                # two-step parsing
+                l_lst = l.split()
+                l_parsed = []
+                for w in l_lst:
+                    l_parsed += w.strip('()').split(',')
+                    
+                try:
+                    extent.append(abs(float(l_parsed[-2])))
+                except:
+                    extent.append(np.nan)
 
         for l in parse_list:
             if 'nodata value' in l.lower():
@@ -103,7 +106,7 @@ def get_extent(fname, x_field='x', y_field='y'):
             elif 'cellsize' in l.lower():
                 w = l.split(' ')
                 w = [w[i_w] for i_w in range(len(w)) if w[i_w] != '']
-                cellsize = float(w[-1])
+                cellsize = abs(float(w[-1]))
             elif 'nodata_value' in l.lower():
                 w = l.split(' ')
                 w = [w[i_w] for i_w in range(len(w)) if w[i_w] != '']
@@ -229,6 +232,7 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
         time_b (str, optional): date-time to calculate over in file B, required for netcdf (e.g., '2020-10-01', or '2020-10-01 23:00'). Defaults to None.
         convert_factor_b (float, optional): multiplier for file B for unit conversion. Defaults to 1.0.
         calc (str, optional): python operator, use (*, +, -, /, %, **, //). Defaults to '*'.
+                              Note: Zero division returns a no value
         fname_out (str, optional): Name of output ascid-grid desired - include '.asc'. Defaults to 'img_out.asc'.
 
     Raises:
@@ -298,7 +302,7 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
             raise ValueError('Extents of {} and {} are not the same'.format(fpath_b, fpath_mask_b))
     
     # operation
-    if all([ex1==ex2 for ex1, ex2 in zip(extent_a[:4], extent_b[:4])]):
+    if all([ex1==ex2 for ex1, ex2 in zip(extent_a[:5], extent_b[:5])]):
         np_in_a = np_in_a * convert_factor_a
         np_in_b = np_in_b * convert_factor_b
         if calc == '*':
@@ -308,6 +312,7 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
         elif calc == '-':
             np_out = np_in_a - np_in_b
         elif calc == '/':
+            np_in_b[np_in_b == 0] = np.nan # added to avoid zero division errors
             np_out = np_in_a / np_in_b
         elif calc == '%':
             np_out = np_in_a % np_in_b
