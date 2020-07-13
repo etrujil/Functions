@@ -9,18 +9,18 @@ from skimage import io
 
 def snowfall_rescaling_timestep(precip_np, snow_fraction_np, snow_map_np):
     '''
-    Parameters:
-        Precip_np: 2D numpy array with the precipitation field for a given timestep
-        snow_fraction_np: 2D numpy array with the snow fraction (0.0 - 1.0) field for a given timestep
-        snow_map_np: 2D numpy array with the snow field to use for the rescaling
+    Args:
+        Precip_np (numpy array): 2D numpy array with the precipitation field for a given timestep
+        snow_fraction_np (numpy array): 2D numpy array with the snow fraction (0.0 - 1.0) field for a given timestep
+        snow_map_np (numpy array): 2D numpy array with the snow field to use for the rescaling
             of solid precip
 
         All input grids must have the same projection, extent, and resolution
 
     Return:
-        precip_np_out: 2D numpy array with rescaled total precipitation (rain + snow) mass
+        precip_np_out (numpy array): 2D numpy array with rescaled total precipitation (rain + snow) mass
                        for the time interval
-        snow_fraction_np_out: 2D numpy array with the snow fraction (0.0 - 1.0)
+        snow_fraction_np_out (numpy array): 2D numpy array with the snow fraction (0.0 - 1.0)
 
     Note: This function assumes that there are not no-data flags, just values with a range between 0-inf
     '''
@@ -72,18 +72,18 @@ def snowfall_rescaling_timestep(precip_np, snow_fraction_np, snow_map_np):
 
 def snowfall_rescaling(precip_path, percent_snow_path, snow_map_path, precip_field='precip', snow_percent_field='percent_snow'):
     '''
-    Parameters:
-        precip_path: full path of NetCDF4 file with the precipitation information
-        percent_snow_path: full path of NetCDF4 file with the snow fraction information
-        precip_field: name of the precipitation field in the nc file (str)
-        snow_percent_field: name of the field containing the
-            percentage of precip in the form of snow (str)
+    Args:
+        precip_path (str): full path of NetCDF4 file with the precipitation information
+        percent_snow_path (str): full path of NetCDF4 file with the snow fraction information
+        precip_field (str, optional): name of the precipitation field in the nc file
+        snow_percent_field (str, optional): name of the field containing the
+            percentage of precip in the form of snow
 
         All input grids must have the same projection, extent, and resolution
 
     Return:
-        precip_np_out: 3D numpy array with total precipitation (rain + snow) mass per time interval
-        snow_fraction_np_out: 3D numpy array with fraction (0-1)
+        precip_np_out (numpy array): 3D numpy array with total precipitation (rain + snow) mass per time interval
+        snow_fraction_np_out (numpy array): 3D numpy array with fraction (0-1)
 
     Note: Assuming that there are not no-data flags, just values with a range between 0-inf
     '''
@@ -95,11 +95,7 @@ def snowfall_rescaling(precip_path, percent_snow_path, snow_map_path, precip_fie
 
     precip_nc = nc.Dataset('precip_rescaled.nc', 'r+')
     percent_nc = nc.Dataset('percent_snow_rescaled.nc', 'r+')
-    #
-    # precip_rescaled = np.zeros(
-    #     precip_nc.variables[precip_field].shape, dtype=float)
-    # percent_rescaled = np.zeros(
-    #     percent_nc.variables[snow_percent_field].shape, dtype=float)
+
     rescaling_flag = np.empty(
         precip_nc.variables[precip_field].shape[0], dtype=bool)
 
@@ -113,18 +109,8 @@ def snowfall_rescaling(precip_path, percent_snow_path, snow_map_path, precip_fie
                                           :, :] = precip_rescaled_aux
         percent_nc.variables[snow_percent_field][i_time,
                                                  :, :] = percent_rescaled_aux
-
-        # precip_nc.sync()
-        # percent_nc.sync()
-
-    # precip_nc.variables[precip_field][:] = precip_rescaled
-    # percent_nc.variables[snow_percent_field][:] = percent_rescaled
-
     precip_nc.close()
     percent_nc.close()
-
-    # return None
-    # precip_rescaled, percent_rescaled, rescaling_flag
 
 
 def main():
