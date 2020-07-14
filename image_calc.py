@@ -189,7 +189,7 @@ def load_img(fpath, nc_field=None, timestep=None):
             np_out[np_out == extent[5]] = np.nan
 
     elif file_type == 'tif':
-        np_out = io.imread(fpath)
+        np_out = io.imread(fpath).astype(float)
         extent = get_extent(fpath)
         if len(extent) == 6:
             np_out[np_out == extent[5]] = np.nan
