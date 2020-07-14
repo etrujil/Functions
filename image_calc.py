@@ -275,7 +275,7 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
             raise IOError('File not found or file type not recognized in {}, please check and try again...'.format(fpath_mask_a))
         
         if all([ex1==ex2 for ex1, ex2 in zip(extent_a[:4], extent_mask_a[:4])]):
-            np_in_a[mask_a < 1] = np.nan
+            np_in_a[mask_a < 1.0] = np.nan
         else:
             raise ValueError('Extents of {} and {} are not the same'.format(fpath_a, fpath_mask_a))
 
@@ -297,7 +297,7 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
             raise IOError('File not found or file type not recognized in {}, please check and try again...'.format(fpath_mask_b))
         
         if all([ex1==ex2 for ex1, ex2 in zip(extent_b[:4], extent_mask_b[:4])]):
-            np_in_b[mask_b < 1] = np.nan
+            np_in_b[mask_b < 1.0] = np.nan
         else:
             raise ValueError('Extents of {} and {} are not the same'.format(fpath_b, fpath_mask_b))
     
