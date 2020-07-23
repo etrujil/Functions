@@ -91,7 +91,10 @@ def snowfall_rescaling(precip_path, percent_snow_path, snow_map_path, precip_fie
     run('cp ' + precip_path + ' precip_rescaled.nc', shell=True)
     run('cp ' + percent_snow_path + ' percent_snow_rescaled.nc', shell=True)
 
-    snow_map_np = io.imread(snow_map_path)
+    if 'tif' in snow_map_path.split('.')[-1]:
+        snow_map_np = io.imread(snow_map_path)
+    elif 'asc' in snow_map_path.split('.')[-1]:
+        snow_map_np = np.loadtxt(snow_map_path, skiprows=6)
 
     precip_nc = nc.Dataset('precip_rescaled.nc', 'r+')
     percent_nc = nc.Dataset('percent_snow_rescaled.nc', 'r+')
