@@ -7,6 +7,7 @@ import xarray as xr
 from subprocess import check_output
 from skimage import io
 from os.path import isfile
+from pandas import to_datetime
 
 
 # Function to get extent
@@ -253,6 +254,9 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
 
     """
 
+    t0 = to_datetime(check_output('date', shell=True, universal_newlines=True))
+    print('Start time: {}'.format(t0.strftime('%Y-%m-%d %H:%M:%S')))
+
     # load files
 
     # fpath_a
@@ -341,9 +345,14 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
     try:
         np.savetxt(fname_out, np_out,
                 header=header, fmt="%.3f", comments='')
-        print('file {} saved in current directory'.format(fname_out))
+        print('file {} saved'.format(fname_out))
     except:
         raise IOError("Saving file {} failed...")
+
+    t1 = to_datetime(check_output('date', shell=True, universal_newlines=True))
+    print('End time: {}'.format(t1.strftime('%Y-%m-%d %H:%M:%S')))
+    print('Total run time: {}'.format(str(t1-t0)))
+
     
 def main():
     p = argparse.ArgumentParser(description='Operates over two fields in specified files - '

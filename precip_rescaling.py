@@ -3,8 +3,9 @@
 import argparse
 import netCDF4 as nc
 import numpy as np
-from subprocess import run
+from subprocess import run, check_output
 from skimage import io
+from pandas import to_datetime
 
 
 def snowfall_rescaling_timestep(precip_np, snow_fraction_np, snow_map_np):
@@ -81,12 +82,14 @@ def snowfall_rescaling(precip_path, percent_snow_path, snow_map_path, precip_fie
 
         All input grids must have the same projection, extent, and resolution
 
-    Return:
-        precip_np_out (numpy array): 3D numpy array with total precipitation (rain + snow) mass per time interval
-        snow_fraction_np_out (numpy array): 3D numpy array with fraction (0-1)
+    Return: None
+        A copy of input precip and percent_snow is saved in the current folder with names:
+        'precip_rescaled.nc' and 'percent_snow_rescaled.nc'
 
     Note: Assuming that there are not no-data flags, just values with a range between 0-inf
     '''
+    t0 = to_datetime(check_output('date', shell=True, universal_newlines=True))
+    print('Start time: {}'.format(t0.strftime('%Y-%m-%d %H:%M:%S')))
 
     run('cp ' + precip_path + ' precip_rescaled.nc', shell=True)
     run('cp ' + percent_snow_path + ' percent_snow_rescaled.nc', shell=True)
@@ -114,6 +117,12 @@ def snowfall_rescaling(precip_path, percent_snow_path, snow_map_path, precip_fie
                                                  :, :] = percent_rescaled_aux
     precip_nc.close()
     percent_nc.close()
+
+    t1 = to_datetime(check_output('date', shell=True, universal_newlines=True))
+    print('End time: {}'.format(t1.strftime('%Y-%m-%d %H:%M:%S')))
+    print('Total run time: {}'.format(str(t1-t0)))
+
+    return None
 
 
 def main():
