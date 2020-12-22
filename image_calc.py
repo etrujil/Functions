@@ -4,6 +4,7 @@ import argparse
 import netCDF4 as nc
 import numpy as np
 import xarray as xr
+import pandas as pd
 from subprocess import check_output
 from skimage import io
 from os.path import isfile
@@ -214,10 +215,49 @@ def load_img(fpath, nc_field=None, timestep=None):
 
     return np_out
 
+def rho_table(depth, density, depth_bin=0.10):
+    """Creates a lookup table for snow density as a function of depth
+
+    Args:
+        depth (numpy.array): depth array
+        density (numpy.array): density array
+        depth (float, optional): bin width for the lookup table
+
+    Returns:
+        df_table (pandas dataframe): pandas dataframe with summary statistics of density for depth bins
+    """
+    # input data as a pandas dataframe with depths as index
+    df_data = pd.DataFrame(data = density.flatten(), index=depth.flatten(), columns=['density'])
+
+    bins_ll = np.arange(0, depth.max() + depth_bin, depth_bin).round(decimals=4) 
+    # numpy is creating some issues with extra residuals in these values, so rounding up to create the proper precision in the indices
+    bins_mark = bins_ll + depth_bin/2
+
+    # dataframe with summary stats
+    df_table = pd.DataFrame(np.nan, index=bins_ll, columns=['depth_mark','rho_min', 'rho_max', 'rho_mean', 'count'])
+    df_table.depth_mark = bins_mark
+
+    for ll in bins_ll:
+
+        df_select = df_data[(df_data.index > ll) & (df_data.index <= ll+depth_bin)]
+        df_table.loc[ll, ['rho_min', 'rho_max', 'rho_mean', 'count']] = [
+            df_select.min().density,
+            df_select.max().density,
+            df_select.mean().density,
+            df_select.shape[0]
+            ]
+
+    df_table.rename_axis('depth_ll')
+
+    df_table.to_csv('rho_table.csv')
+
+    return df_table
+
 
 def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
-                   nc_field_a=None, time_a=None, convert_factor_a=1.0,
-                   nc_field_b=None, time_b=None, convert_factor_b=1.0,
+                   nc_field_a=None, time_a=None, convert_factor_a=1.0, fill_density_a=False,
+                   nc_field_b=None, time_b=None, convert_factor_b=1.0, fill_density_b=False,
+                   depth_bin_fill=0.1,
                    calc='*', fname_out='img_out.asc'):
     """Performs operation on input rasters
 
@@ -229,9 +269,12 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
         nc_field_a (str, optional): Name of netcdf variable in file A to calculate over, required for netcdf. Defaults to None.
         time_a (str, optional): date-time to calculate over in file A, required for netcdf (e.g., '2020-10-01', or '2020-10-01 23:00'). Defaults to None.
         convert_factor_a (float, optional): multiplier for field A for unit conversion. Defaults to 1.0.
+        fill_density_a (bool, optional): If True, will fill densities values for areas with no snow in model but measured snow depth > 0 (e.g., in lidar measured depths in field B).
         nc_field_b (str, optional): Name of netcdf variable in file B to calculate over, required for netcdf. Defaults to None.
         time_b (str, optional): date-time to calculate over in file B, required for netcdf (e.g., '2020-10-01', or '2020-10-01 23:00'). Defaults to None.
         convert_factor_b (float, optional): multiplier for file B for unit conversion. Defaults to 1.0.
+        fill_density_b (bool, optional): If True, will fill densities values for areas with no snow in model but measured snow depth > 0 (e.g., in lidar measured depths in field A).
+        depth_bin_fill (float, optional): bin width for the density lookup table, defaults to 0.1.
         calc (str, optional): python operator, use (*, +, -, /, %, **, //). Defaults to '*'.
                               Note: Zero division returns a no value
         fname_out (str, optional): Name of output ascid-grid desired - include '.asc'. Defaults to 'img_out.asc'.
@@ -257,6 +300,9 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
     t0 = to_datetime(check_output('date', shell=True, universal_newlines=True))
     print('Start time: {}'.format(t0.strftime('%Y-%m-%d %H:%M:%S')))
 
+    if fill_density_a and fill_density_b:
+        raise IOError('fill_density options cannot be used on both files, please choose one and run again')
+
     # load files
 
     # fpath_a
@@ -268,7 +314,7 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
             'File not found or file type not recognized in {}, please check and try again...'.format(fpath_a))
     except KeyError:
         raise KeyError(
-            'Key or time dimension not found in {}, please check and try again...'.format(fpath_a))
+            '{} Key or time dimension not found in {}, please check and try again...'.format(nc_field_a, fpath_a))
 
     # mask_a
     if fpath_mask_a is not None:
@@ -283,6 +329,21 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
         else:
             raise ValueError('Extents of {} and {} are not the same'.format(fpath_a, fpath_mask_a))
 
+    # for fill_density_a option
+    if fill_density_a:
+        try:
+            model_depth_a = load_img(fpath_a, nc_field='thickness', timestep=time_a)
+        except IOError:
+            raise IOError(
+                'fill_density_a option unsuccessful, please check and try again...')
+        except KeyError:
+            raise KeyError(
+                'thickness key or time dimension not found in {}, please check and try again...'.format(fpath_a))
+
+        # now create lookup table
+        rho_table_a = rho_table(model_depth_a, np_in_a, depth_bin=depth_bin_fill)
+
+
     # fpath_b
     try:
         np_in_b = load_img(fpath_b, nc_field=nc_field_b, timestep=time_b)
@@ -290,7 +351,7 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
     except IOError:
         raise IOError('File not found or file type not recognized in {}, please check and try again...'.format(fpath_b))
     except KeyError:
-        raise KeyError('Key or time dimension not found in {}, please check and try again...'.format(fpath_b))
+        raise KeyError('{} key or time dimension not found in {}, please check and try again...'.format(nc_field_b, fpath_b))
     
     # mask_b
     if fpath_mask_b is not None:
@@ -304,13 +365,50 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
             np_in_b[mask_b != 1.0] = np.nan
         else:
             raise ValueError('Extents of {} and {} are not the same'.format(fpath_b, fpath_mask_b))
+
+    # for fill_density_b option
+    if fill_density_b:
+        try:
+            model_depth_b = load_img(fpath_b, nc_field='thickness', timestep=time_b)
+        except IOError:
+            raise IOError(
+                'fill_density_b option unsuccessful, please check and try again...')
+        except KeyError:
+            raise KeyError(
+                'thickness key or time dimension not found in {}, please check and try again...'.format(fpath_b))
+
+        # now create lookup table
+        rho_table_b = rho_table(model_depth_b, np_in_b, depth_bin=depth_bin_fill)
     
     # operation
     if all([ex1==ex2 for ex1, ex2 in zip(extent_a[:5], extent_b[:5])]):
         np_in_a = np_in_a * convert_factor_a
         np_in_b = np_in_b * convert_factor_b
         if calc == '*':
+
+            # These options will not work properly if convert_factors != 1.0 (need testing)
+            if fill_density_a:
+                # This is optimized to multiply lidar snow depths x modeled snow density
+                # if the modeled data is in fpath_a, then find values where there are lidar snow depths > 0, 
+                # and zero modeled densities, and assign a density value based on rho_table
+                index_fill = (np_in_a == 0) & (np_in_b > 0)
+
+                index_to_lookup = np_in_b[index_fill] - (np_in_b[index_fill] % depth_bin_fill)
+
+                np_in_a[index_fill] = rho_table_a.loc[index_to_lookup.round(decimals=4), 'rho_mean'].values
+
+            elif fill_density_b:
+                # This is optimized to multiply lidar snow depths x modeled snow density
+                # if the modeled data is in fpath_b, then find values where there are lidar snow depths > 0, 
+                # and zero modeled densities, and assign a density value based on rho_table
+                index_fill = (np_in_a > 0) & (np_in_b == 0)
+
+                index_to_lookup = np_in_a[index_fill] - (np_in_a[index_fill] % depth_bin_fill)
+
+                np_in_b[index_fill] = rho_table_b.loc[index_to_lookup.round(decimals=4), 'rho_mean'].values
+
             np_out = np_in_a * np_in_b
+        
         elif calc == '+':
             np_out = np_in_a + np_in_b
         elif calc == '-':
@@ -379,6 +477,9 @@ def main():
     p.add_argument("-cfA", "--convfactA", dest="convert_factor_a",
                    required=False, type=float, default=1.0,
                    help="multiplier for file A for unit conversion. Default: 1.0")
+    p.add_argument("-fdA", "--filldensityA", dest="fill_density_a",
+                   required=False, type=bool, default=False,
+                   help="If True, will fill density values for areas with no snow in model (in pathA) but measured snow depth > 0. Default: False")
     p.add_argument("-fB", "--fieldB", dest="nc_field_b",
                    required=False, type=str, default=None,
                    help="Name of netcdf variable in file B to calculate over (optional, required for netcdf)")
@@ -388,6 +489,12 @@ def main():
     p.add_argument("-cfB", "--convfactB", dest="convert_factor_b",
                    required=False, type=float, default=1.0,
                    help="multiplier for file B for unit conversion. Default: 1.0")
+    p.add_argument("-fdB", "--filldensityB", dest="fill_density_b",
+                   required=False, type=bool, default=False,
+                   help="If True, will fill density values for areas with no snow in model (in pathB) but measured snow depth > 0. Default: False")
+    p.add_argument("-bf", "--binfill", dest="depth_bin_fill",
+                   required=False, type=float, default=0.1,
+                   help="bin width for the density lookup table, defaults to 0.1. Default: 0.1")
     p.add_argument("-c", "--calc", dest="calc",
                    required=False, type=str, default="*",
                    help="operator (e.g., '*' - default)")
@@ -398,9 +505,11 @@ def main():
     args = p.parse_args()
 
     image_calc(args.fpath_a, args.fpath_b , args.fpath_mask_a, args.fpath_mask_b, 
-                   args.nc_field_a, args.time_a, args.convert_factor_a,
-                   args.nc_field_b, args.time_b, args.convert_factor_b,
+                   args.nc_field_a, args.time_a, args.convert_factor_a, args.fill_density_a,
+                   args.nc_field_b, args.time_b, args.convert_factor_b, args.fill_density_b,
+                   args.depth_bin_fill,
                    args.calc, args.fname_out)
+
 
 if __name__ == '__main__':
     main()
