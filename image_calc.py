@@ -392,6 +392,7 @@ def image_calc(fpath_a, fpath_b, fpath_mask_a=None, fpath_mask_b=None,
                 # if the modeled data is in fpath_a, then find values where there are lidar snow depths > 0, 
                 # and zero modeled densities, and assign a density value based on rho_table
                 index_fill = (np_in_a == 0) & (np_in_b > 0)
+                print(index_fill, index_fill.shape)
 
                 index_to_lookup = np_in_b[index_fill] - (np_in_b[index_fill] % depth_bin_fill)
 

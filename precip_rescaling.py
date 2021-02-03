@@ -41,10 +41,10 @@ def snowfall_rescaling_timestep(precip_np, snow_fraction_np, snow_map_np, elev_t
     else:
         domain_thres = np.ones(np.shape(snow_map_np))
 
-    # precip_np_out = precip_np.copy()
-    # snow_fraction_np_out = snow_fraction_np.copy()
-    precip_np_out = np.zeros(np.shape(precip_np))
-    snow_fraction_np_out = np.zeros(np.shape(snow_fraction_np))
+    precip_np_out = precip_np.copy()
+    snow_fraction_np_out = snow_fraction_np.copy()
+    # precip_np_out = np.zeros(np.shape(precip_np))
+    # snow_fraction_np_out = np.zeros(np.shape(snow_fraction_np))
     return_flag = False  # True if rescaled
 
     if np.sum(snow_fraction_np) > 0:
@@ -172,6 +172,7 @@ def snowfall_rescaling(precip_path, percent_snow_path, snow_map_path, precip_fie
 
     rescaling_flag = np.empty(
         precip_nc.variables[precip_field].shape[0], dtype=bool)
+    rescaling_flag[:] = False
 
     for i_time in range(len(rescaling_flag)):
 
